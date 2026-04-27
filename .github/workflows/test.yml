@@ -1,0 +1,36 @@
+name: Test
+
+on:
+  push:
+  workflow_dispatch: 
+
+permissions: {}
+
+jobs:
+  test:
+    name: test
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      json: ${{ steps.update.outputs.json }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: update
+        id: update
+        uses: check-spelling-sandbox/jubilant-journey@main
+        with:
+          config: |
+            [
+              {
+                "path": "github/dependabot-action",
+                "old": "node20",
+                "new": "node24"
+              }
+            ]
+
+      - name: checkout
+        uses: actions/checkout@v6
+
+      - name: dependabot-action
+        uses: github/dependabot-action@v2

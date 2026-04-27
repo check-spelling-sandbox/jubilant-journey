@@ -1,0 +1,103 @@
+name: "Force node version"
+description: "Replace node version"
+author: "jsoref"
+branding:
+  icon: "edit-3"
+  color: "red"
+inputs:
+  config:
+    description: 'JSON array of { "path": "path-regular-expression-for-actions-to-update", "old": "node20", "new": "node24"}'
+    required: true
+
+outputs:
+  updated-actions:
+    description: 'JSON array of update actions { "path": "path-of-updated-action", "old": "node20", "new": "node24"}'
+    value: ${{ steps.spelling.update.json }}
+
+runs:
+  using: "composite"
+  steps:
+    - id: update
+      shell: bash
+      run: |
+        : Debug
+        b='`'
+        B='```'
+        q="'"
+        Q='"'
+        set -x
+        maybe_q="[$q$Q]?"
+        (
+          echo '# Summary'
+          echo '.|.'
+          echo '-|-'
+          echo "GITHUB_ACTION_PATH | $GITHUB_ACTION_PATH"
+          echo "config | $(echo "$config" | tr '\n' ' ')"
+          echo
+          echo "$B"
+          cd "$GITHUB_ACTION_PATH/../../.."
+          rules=$(mktemp)
+          actions=$(mktemp)
+          focused_files=$(mktemp)
+          log=$(mktemp)
+          jq_errors=$(mktemp)
+          (
+            find . -iname 'action.yaml' || true
+            find . -iname 'action.yml' || true
+          ) | perl -pe 's!^\./!!' | tee "$actions"
+          echo "$B"
+          echo
+          if ! echo "$config" | jq -c '.[]' > "$rules" 2> "$jq_errors"; then
+            echo '### jq did not like the rules'
+            echo '<details><summary>jq output</summary>'
+            echo
+            echo "$B"
+            cat "$jq_errors"
+            echo
+            echo "$B"
+            echo "</details>"
+            echo
+            echo '<details><summary>rules</summary>'
+            echo "${B}json"
+            cat "$rules"
+            echo
+            echo "$B"
+            echo "</details>"
+            echo
+          fi
+          echo '### rules'
+          echo "$B"
+          cat "$rules"
+          echo "$B"
+          echo
+          while IFS= read -r rule; do
+            path_re=$(echo "$rule" | jq -r '.path // empty')
+            old=$(echo "$rule" | jq -r '.old // empty')
+            new=$(echo "$rule" | jq -r '.new // empty')
+            echo 'path|old|new'
+            echo '-|-|-'
+            echo "$b$path_re$b | $b$old$b | $b$new$b"
+            echo
+            grep -E "$path_re" "$actions" > "$focused_files" || true
+            while IFS= read -r file; do
+              if [ $(
+                maybe_q="$maybe_q" \
+                new="$new" \
+                old="$old" \
+                perl -pi -e '
+                  my $maybe_q=$ENV{maybe_q};
+                  my $new=$ENV{new};
+                  my $old=$ENV{old};
+                  print STDERR 1 if s/(^\s+using:\s+$maybe_q)$old($maybe_q\s*$)/$1$new$2/;
+                ' "$file" 2>&1
+              ) == '1' ]; then
+                echo "{ ${Q}path${Q}: ${Q}$file${Q}, ${Q}old${Q}: ${Q}$old${Q}, ${Q}new${Q}: ${Q}$new${Q}}" >> "$log"
+              fi
+            done < "$focused_files"
+            echo
+          done < "$rules"
+          echo
+          echo 'updated-actions='$(jq -c -s . "$log" || true) >> "$GITHUB_OUTPUT"
+        ) >> "$GITHUB_STEP_SUMMARY"
+      env:
+        config: ${{ inputs.config }}
